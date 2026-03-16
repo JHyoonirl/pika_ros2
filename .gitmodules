@@ -1,0 +1,3 @@
+[submodule "src/pika_driver/pika_driver/libsurvive"]
+	path = src/pika_driver/pika_driver/libsurvive
+	url = https://github.com/collabora/libsurvive.git
