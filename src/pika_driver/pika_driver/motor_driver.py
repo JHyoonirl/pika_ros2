@@ -295,7 +295,6 @@ class RosOperator(Node):
         rad_match = self.rad_pattern.search(line)
         pos_match = self.pos_pattern.search(line)
         status_match = self.status_pattern.search(line)
-
         if status_match:
             try:
                 status_hex = status_match.group(1).decode('ascii')
@@ -309,11 +308,13 @@ class RosOperator(Node):
         if rad_match:
             try:
                 active_val = float(rad_match.group(1))
+                # self.get_logger().debug(f"Parsed rad: {active_val:.4f} from line: {line}")
             except Exception:
                 active_val = None
         elif pos_match:
             try:
                 active_val = float(pos_match.group(1))
+                print(f"Parsed pos: {active_val:.4f} ")
             except Exception:
                 active_val = None
 
