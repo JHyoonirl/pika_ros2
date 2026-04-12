@@ -36,7 +36,7 @@ docker build -t pika_ros2:latest -f docker/Dockerfile .
 GPU와 USB 접근 권한이 포함된 실행 스크립트를 사용합니다.
 
 ```bash
-chmod +x run_docker.sh
+sudo chmod +x docker/run_docker.sh
 bash docker/run_docker.sh
 ```
 
