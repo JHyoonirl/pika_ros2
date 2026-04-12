@@ -27,7 +27,7 @@ class RosOperator(Node):
         self.camera_color_publisher = None
         self.camera_config_publisher = None
         self.camera_frame_id = None
-        self.topic_ns = '/fisheye'
+        self.namespace = '/fisheye'
         self.tf_broadcaster = None
         self.running = False
         self.camera_thread = None
@@ -40,25 +40,25 @@ class RosOperator(Node):
         self.declare_parameter('camera_height', 480)
         self.declare_parameter('camera_width', 640)
         self.declare_parameter('camera_frame_id', "camera_rgb")
-        self.declare_parameter('topic_ns', '/fisheye')
+        self.declare_parameter('namespace', '/fisheye')
         self.camera_device = self.get_parameter('camera_device').get_parameter_value().string_value
         self.camera_hz = int(self.get_parameter('camera_fps').get_parameter_value().integer_value)
         self.camera_height = int(self.get_parameter('camera_height').get_parameter_value().integer_value)
         self.camera_width = int(self.get_parameter('camera_width').get_parameter_value().integer_value)
         self.camera_frame_id = self.get_parameter('camera_frame_id').get_parameter_value().string_value
-        self.topic_ns = self.get_parameter('topic_ns').get_parameter_value().string_value
+        self.namespace = self.get_parameter('namespace').get_parameter_value().string_value
 
-        self.topic_ns = self.topic_ns.rstrip('/')
-        if not self.topic_ns:
-            self.topic_ns = '/fisheye'
-        if not self.topic_ns.startswith('/'):
-            self.topic_ns = '/' + self.topic_ns
+        self.namespace = self.namespace.rstrip('/')
+        if not self.namespace:
+            self.namespace = '/fisheye'
+        if not self.namespace.startswith('/'):
+            self.namespace = '/' + self.namespace
 
         if self.camera_frame_id.startswith('/'):
             self.camera_frame_id = self.camera_frame_id[1:]
 
-        color_topic = f'{self.topic_ns}/color/image_raw'
-        camera_info_topic = f'{self.topic_ns}/color/camera_info'
+        color_topic = f'{self.namespace}/fisheye/image_raw'
+        camera_info_topic = f'{self.namespace}/fisheye/camera_info'
 
         self.bridge = CvBridge()
         self.camera_color_publisher = self.create_publisher(Image, color_topic, 10)
@@ -67,7 +67,7 @@ class RosOperator(Node):
         self.get_logger().info(f'camera_device: {self.camera_device}')
         self.get_logger().info(f'camera_fps: {self.camera_hz}')
         self.get_logger().info(f'camera_size: {self.camera_width}x{self.camera_height}')
-        self.get_logger().info(f'topic_ns: {self.topic_ns}')
+        self.get_logger().info(f'namespace: {self.namespace}')
 
 
     def init_camera(self):

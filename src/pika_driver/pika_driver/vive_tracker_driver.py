@@ -370,6 +370,7 @@ class ViveTrackerNode(Node):
         # ------------------------------------------
         self.declare_parameter("serial_numbers", [""])
         self.declare_parameter("tracker_ids", [""])
+        self.declare_parameter("namespaces", [""]) # 리스트 형태를 받기 위해 복수형으로 선언 권장
         self.declare_parameter("publish_rate", 100.0)
         self.declare_parameter("frame_id", "world")
         self.declare_parameter("config_path", "")
@@ -377,6 +378,7 @@ class ViveTrackerNode(Node):
 
         self.serial_numbers = [s for s in list(self.get_parameter("serial_numbers").value) if s]
         self.tracker_ids = [s for s in list(self.get_parameter("tracker_ids").value) if s]
+        self.namespaces = [s for s in list(self.get_parameter("namespaces").value) if s]
         self.frame_id = self.get_parameter("frame_id").get_parameter_value().string_value
         publish_rate = self.get_parameter("publish_rate").get_parameter_value().double_value
         config_path = self.get_parameter("config_path").get_parameter_value().string_value or None
@@ -391,29 +393,39 @@ class ViveTrackerNode(Node):
         if len(self.tracker_ids) == 0:
             self.tracker_ids = [f"tracker_{i}" for i in range(len(self.serial_numbers))]
 
-        if len(self.tracker_ids) != len(self.serial_numbers):
-            raise RuntimeError("tracker_ids 개수와 serial_numbers 개수는 같아야 합니다.")
-
-        # serial -> tracker_id
-        self.serial_to_tracker_id: Dict[str, str] = {
-            serial: tracker_id for serial, tracker_id in zip(self.serial_numbers, self.tracker_ids)
-        }
+        # namespaces가 비어있으면 기본값 생성
+        if len(self.namespaces) == 0:
+            self.namespaces = ["vive_tracker" for _ in range(len(self.serial_numbers))]
+        
+        if not (len(self.serial_numbers) == len(self.tracker_ids) == len(self.namespaces)):
+            raise RuntimeError("serial_numbers, tracker_ids, namespaces의 리스트 길이는 모두 같아야 합니다.")
+        
+        
+        # 시리얼 번호를 키로 하여 ID와 Namespace를 관리하는 딕셔너리 생성
+        self.tracker_configs = {}
+        for serial, tid, ns in zip(self.serial_numbers, self.tracker_ids, self.namespaces):
+            self.tracker_configs[serial] = {
+                "id": tid,
+                "ns": ns
+            }
 
         # publishers
         self.pose_publishers: Dict[str, any] = {}
         self.raw_pose_publishers: Dict[str, any] = {}
 
-        for serial, tracker_id in self.serial_to_tracker_id.items():
-            topic = f"/vive_tracker/{tracker_id}/pose"
-            topic_raw = f"/vive_tracker/{tracker_id}/pose_raw"
+        for serial, config in self.tracker_configs.items():
+            ns = config["ns"]
+            tid = config["id"]
+            
+            # namespace/tracker_id/pose 형태로 구성
+            topic = f"{ns}/{tid}/pose"
+            topic_raw = f"{ns}/{tid}/pose_raw"
 
             self.pose_publishers[serial] = self.create_publisher(PoseStamped, topic, 10)
             self.raw_pose_publishers[serial] = self.create_publisher(PoseStamped, topic_raw, 10)
 
-            self.get_logger().info(f"[{tracker_id}] serial={serial}")
-            self.get_logger().info(f"[{tracker_id}] pose topic: {topic}")
-            self.get_logger().info(f"[{tracker_id}] raw pose topic: {topic_raw}")
-
+            self.get_logger().info(f"Registered [{tid}] at Namespace [{ns}] with Serial [{serial}]")
+        
         # driver
         self.driver = ViveTrackerDriver(config_path=config_path, lh_config=lh_config)
         if not self.driver.connect():
@@ -438,7 +450,7 @@ class ViveTrackerNode(Node):
     def _publish_pose(self):
         now = self.get_clock().now().to_msg()
 
-        for serial, tracker_id in self.serial_to_tracker_id.items():
+        for serial, config in self.tracker_configs.items():
             pose_data = self.driver.get_pose_by_serial(serial)
             if pose_data is None:
                 continue
@@ -455,6 +467,7 @@ class ViveTrackerNode(Node):
             msg.pose.orientation.z = pose_data.rotation[2]
             msg.pose.orientation.w = pose_data.rotation[3]
             self.pose_publishers[serial].publish(msg)
+            # self.get_logger().info(f"[{tracker_id}] Pose published: pos=({pose_data.position[0]:.3f}, {pose_data.position[1]:.3f}, {pose_data.position[2]:.3f}), rot=({pose_data.rotation[0]:.3f}, {pose_data.rotation[1]:.3f}, {pose_data.rotation[2]:.3f}, {pose_data.rotation[3]:.3f})")
 
             # raw pose
             msg_raw = PoseStamped()

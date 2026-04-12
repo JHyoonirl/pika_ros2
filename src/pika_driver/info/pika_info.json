@@ -1,0 +1,28 @@
+{
+    "sense_left": {
+        "namespace": "pika_left_sense",
+        "realsense_serial": "315122271136",
+        "fisheye_device": "/dev/pika_sense_left_video",
+        "motor_port": "/dev/pika_sense_left_serial",
+        "tracker_serial": "LHR-63AAAF5B"
+    },
+    "sense_right": {
+        "namespace": "pika_right_sense",
+        "realsense_serial": "315122270900",
+        "fisheye_device": "/dev/pika_sense_right_video",
+        "motor_port": "/dev/pika_sense_right_serial",
+        "tracker_serial": "LHR-FBF3A347"
+    },
+    "gripper_left":{
+        "namespace": "pika_left_gripper",
+        "realsense_serial": "315122270809",
+        "fisheye_device": "/dev/pika_gripper_left_video",
+        "motor_port": "/dev/pika_gripper_left_serial"
+    },
+    "gripper_right":{
+        "namespace": "pika_right_gripper",
+        "realsense_serial": "315122270807",
+        "fisheye_device": "/dev/pika_gripper_right_video",
+        "motor_port": "/dev/pika_gripper_right_serial"
+    }
+}

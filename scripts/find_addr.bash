@@ -3,46 +3,51 @@
 # --- 색상 설정 ---
 GREEN='\033[0;32m'
 CYAN='\033[0;36m'
+YELLOW='\033[0;33m'
 NC='\033[0m'
 
-echo -e "${GREEN}=== Pika Physical Address Scanner ===${NC}"
-echo " [요령] 'ttyUSB0' 같은 이름 말고, '1-4.3.4' 처럼 숫자와 점으로 된 것을 복사하세요."
+echo -e "${GREEN}=== Pika Final Physical Address Scanner (No-Freeze) ===${NC}"
 echo "------------------------------------------------"
 
-# 1. 시리얼 장치(ttyUSB) 스캔
+# 1. 시리얼 포트 (ttyUSB) 스캔
 echo -e "${CYAN}[1] 시리얼 포트 (ttyUSB)${NC}"
+for dev in /dev/ttyUSB*; do
+    [ -e "$dev" ] || continue # 장치가 없으면 패스
+    
+    # 1단계: 실제 물리 경로 획득
+    # 예: /sys/devices/.../usb3/3-2/3-2.2/3-2.2.1/3-2.2.1.4/3-2.2.1.4:1.0/ttyUSB0
+    real_path=$(readlink -f /sys/class/tty/$(basename "$dev")/device)
+    
+    # 2단계: 인터페이스(:1.0) 폴더의 부모 폴더가 바로 '물리 주소'입니다.
+    # dirname으로 /3-2.2.1.4:1.0 부분을 날리고, 그 윗 단계의 이름을 가져옵니다.
+    addr=$(basename $(dirname "$real_path"))
+    
+    echo -e "  장치: ${YELLOW}$dev${NC}"
+    echo -e "  주소: ${GREEN}$addr${NC}"
+    echo "------------------------------------------------"
+done
 
-# 장치가 있는지 확인
-count=$(ls /dev/ttyUSB* 2>/dev/null | wc -l)
-if [ "$count" == "0" ]; then
-    echo "  (연결된 ttyUSB 장치가 없습니다)"
-else
-    for dev in /dev/ttyUSB*; do
-        echo "  장치: $dev"
-        echo "  [주소 후보]"
-        # 상위 5개 KERNELS 중 'ttyUSB'가 포함되지 않은 줄만 보여줌
-        udevadm info -a -n $dev | grep "KERNELS==" | grep -v "ttyUSB" | head -n 3
-        echo "------------------------------------------------"
-    done
-fi
-
-# 2. 어안 카메라(1bcf) 스캔
+# 2. 어안 카메라 (Fisheye) 스캔
 echo -e "${CYAN}[2] 어안 카메라 (Fisheye)${NC}"
-
-# 장치가 있는지 확인
-count_vid=$(ls /dev/video* 2>/dev/null | wc -l)
-if [ "$count_vid" == "0" ]; then
-    echo "  (연결된 비디오 장치가 없습니다)"
-else
-    for dev in /dev/video*; do
-        # 1bcf 제조사인지 확인 (2>/dev/null로 에러 숨김)
-        if udevadm info -a -n $dev 2>/dev/null | grep -q "idVendor.*1bcf"; then
-            echo "  장치: $dev"
-            echo "  [주소 후보]"
-            # 상위 5개 KERNELS 중 'video'나 '1bcf'가 아닌, 숫자 패턴을 찾음
-            udevadm info -a -n $dev | grep "KERNELS==" | grep -v "video" | head -n 3
-            echo "------------------------------------------------"
+for dev in /sys/class/video4linux/video*; do
+    [ -e "$dev" ] || continue
+    vid_name=$(basename "$dev")
+    
+    # 1bcf (어안 카메라 제조사) 제품인지 확인
+    if [ -f "$dev/device/../idVendor" ] && [ "$(cat "$dev/device/../idVendor")" == "1bcf" ]; then
+        real_path=$(readlink -f "$dev/device")
+        
+        # 비디오 장치는 경로 구조가 다를 수 있어 조건문 처리
+        if [[ "$real_path" == *":"* ]]; then
+            addr=$(basename $(dirname "$real_path"))
+        else
+            addr=$(basename "$real_path")
         fi
-    done
-fi
-echo "스캔 완료."
+        
+        echo -e "  장치: ${YELLOW}/dev/$vid_name${NC}"
+        echo -e "  주소: ${GREEN}$addr${NC}"
+        echo "------------------------------------------------"
+    fi
+done
+
+echo -e "${GREEN}스캔 완료.${NC}"

@@ -35,16 +35,10 @@ class Color:
     SIZE = 5
 
 
-class Vibrate:
-    NONE = 0
-    ONE = 1
-    SIZE = 2
-
-
 class RosOperator(Node):
     def __init__(self):
         super().__init__('pika_high_speed_operator')
-        self.get_logger().info('Initializing Pika High-Speed Operator...')
+        self.get_logger().info('Initializing Pika High-Speed Operator (Angle Control Mode)...')
 
         # ------------------------------------------------------------------
         # 1) Parameters
@@ -70,10 +64,9 @@ class RosOperator(Node):
         self.status_pattern = re.compile(br'"Status"\s*:\s*"0x([0-9A-Fa-f]{2})"')
 
         # ------------------------------------------------------------------
-        # 3) Kinematics / LUT
+        # 3) Kinematics (Feedback 전용)
         # ------------------------------------------------------------------
         self._dist_zero = self.get_distance(0.0)
-        self._init_lut()
 
         # ------------------------------------------------------------------
         # 4) State
@@ -84,7 +77,7 @@ class RosOperator(Node):
         self.distance = 0.0
         self.angle = 0.0
 
-        self.target_pos = 0.0
+        self.target_angle = 0.0  # 목표 위치를 '각도'로 관리
         self.target_lock = threading.Lock()
 
         self._last_enable_send = 0.0
@@ -102,7 +95,6 @@ class RosOperator(Node):
         # 5) Serial
         # ------------------------------------------------------------------
         try:
-            # timeout=0 완전 non-blocking 대신 아주 작은 blocking timeout 사용
             self.serial = serial.Serial(
                 port=self.serial_port_name,
                 baudrate=460800,
@@ -138,48 +130,41 @@ class RosOperator(Node):
         self.recv_thread.start()
         self.send_thread.start()
 
-        # 제어를 subscriber callback이 아니라 timer에서 고정 주기로 수행
         self.control_timer = self.create_timer(self.ctrl_period, self.control_loop)
         self.stat_timer = self.create_timer(2.0, self.print_stats)
 
-    # ----------------------------------------------------------------------
-    # Kinematics
-    # ----------------------------------------------------------------------
+        # 시작 시 라이트를 파란색으로 변경
+        time.sleep(0.1)
+        self.send_serial_cmd(SendFlag.LIGHT_CTRL, [Color.BLUE])
     def get_distance(self, angle: float) -> float:
+        """각도를 거리로 변환 (피드백 출력용)"""
         theta = (136.01 / 180.0) * math.pi - angle
         height = 0.0325 * math.sin(theta)
         term = max(0.0, (0.058 ** 2) - (height - 0.01456) ** 2)
         return math.sqrt(term) + 0.0325 * math.cos(theta)
 
-    def _init_lut(self):
-        self._lut_angles = np.linspace(0.0, 1.67, 2000)
-        self._lut_widths = np.array([self.get_distance(a) for a in self._lut_angles])
-
-    def get_angle_from_width(self, target_width: float) -> float:
-        return float(np.interp(target_width, self._lut_widths, self._lut_angles))
-
     # ----------------------------------------------------------------------
     # ROS Callbacks
     # ----------------------------------------------------------------------
     def joint_state_ctrl_handler(self, msg: JointState):
-        # subscriber callback에서는 최신 목표값만 저장
+        """Subscriber로부터 목표 각도(rad)를 직접 받음"""
         if msg.position:
-            pos = float(msg.position[-1])
+            target = float(msg.position[-1])
         else:
-            pos = 0.0
+            target = 0.0
 
-        pos = max(0.0, min(pos, 0.098))
+        # Pika 하드웨어 각도 가동 범위 제한 (0.0 ~ 1.67 rad)
+        # target = max(0.0, min(target, 3.14))
+        # self.get_logger().info(f"Received target angle: {target:.3f} rad")
+        
         with self.target_lock:
-            self.target_pos = pos
+            self.target_angle = target
 
     def control_loop(self):
-        # 제어는 고정 주기 timer에서만 수행
         self.ctrl_count += 1
-
         if not self.serial.is_open:
             return
 
-        # enable 안 되어 있으면 너무 자주 보내지 말고 5Hz 정도로만 enable 요청
         if not self.enable:
             now = time.monotonic()
             if now - self._last_enable_send >= 0.2:
@@ -188,29 +173,28 @@ class RosOperator(Node):
             return
 
         with self.target_lock:
-            pos = self.target_pos
+            angle_to_send = self.target_angle
 
-        target_width = pos * 0.5 + self._dist_zero - 0.005
-        angle = self.get_angle_from_width(target_width)
-        angle = max(0.0, min(angle, 1.67))
-
+        # 기구학 변환 없이 각도를 즉시 시리얼로 전송
         flag = SendFlag.POSITION_CTRL_MIT if self.mit_mode else SendFlag.POSITION_CTRL_POS_VEL
-        self.send_serial_cmd(flag, [angle])
+        # self.get_logger().info(f"Sending angle command: {angle_to_send:.3f} rad with flag {flag}")
+        self.send_serial_cmd(flag, [angle_to_send])
+        # now = time.monotonic()
+        # if self.ctrl_count % 10 == 0: # 너무 자주 보낼 필요 없으므로 10번에 한 번꼴
+        #     self.send_serial_cmd(SendFlag.DISABLE, [0.0])
 
     def print_stats(self):
         now = time.monotonic()
         dt = now - self.last_stat_time
         if dt <= 0.0:
             return
-
         rx_hz = self.rx_count / dt
         ctrl_hz = self.ctrl_count / dt
         tx_hz = self.tx_count / dt
 
         self.get_logger().info(
-            f"RX:{rx_hz:.1f}Hz | CTRL:{ctrl_hz:.1f}Hz | TX:{tx_hz:.1f}Hz | Enable:{self.enable}"
+            f"RX:{rx_hz:.1f}Hz | CTRL:{ctrl_hz:.1f}Hz | TX:{tx_hz:.1f}Hz | Angle:{self.angle:.3f}rad | En:{self.enable}"
         )
-
         self.rx_count = 0
         self.ctrl_count = 0
         self.tx_count = 0
@@ -225,7 +209,6 @@ class RosOperator(Node):
                 data = self.serial_queue.get(timeout=0.05)
             except queue.Empty:
                 continue
-
             try:
                 if self.serial.is_open:
                     self.serial.write(data)
@@ -240,7 +223,6 @@ class RosOperator(Node):
         packed.extend(b'\r\n')
         data = bytes(packed)
 
-        # 최신 명령만 유지
         try:
             while True:
                 self.serial_queue.get_nowait()
@@ -253,40 +235,24 @@ class RosOperator(Node):
             pass
 
     def receiving_thread(self):
-        """
-        시리얼 수신 스레드
-        - busy polling 최소화
-        - 줄 단위 파싱
-        - buffer 전체 findall() 대신 line별 search() 사용
-        """
         buffer = b""
-
         while self.running:
             if not self.serial.is_open:
                 time.sleep(0.05)
                 continue
-
             try:
-                # timeout=0.002 이므로 read가 약간 blocking 되며 CPU 점유를 줄여줌
                 chunk = self.serial.read(self.serial.in_waiting or 1)
                 if not chunk:
                     continue
-
                 buffer += chunk
-
-                # 너무 길어지면 뒤만 남김
                 if len(buffer) > 4096:
                     buffer = buffer[-2048:]
-
-                # 줄 단위 처리
                 while b'\n' in buffer:
                     line, buffer = buffer.split(b'\n', 1)
                     line = line.strip()
                     if not line:
                         continue
-
                     self._parse_serial_line(line)
-
             except Exception as e:
                 self.get_logger().warn(f"Serial read failed: {e}")
                 time.sleep(0.01)
@@ -304,17 +270,14 @@ class RosOperator(Node):
                 pass
 
         active_val = None
-
         if rad_match:
             try:
                 active_val = float(rad_match.group(1))
-                # self.get_logger().debug(f"Parsed rad: {active_val:.4f} from line: {line}")
             except Exception:
                 active_val = None
         elif pos_match:
             try:
                 active_val = float(pos_match.group(1))
-                print(f"Parsed pos: {active_val:.4f} ")
             except Exception:
                 active_val = None
 
@@ -322,26 +285,48 @@ class RosOperator(Node):
             return
 
         self.angle = active_val
+        # 피드백 출력을 위해 거리를 계산만 해둠
         self.distance = 2.0 * (self.get_distance(active_val) - self._dist_zero)
+        # self.get_logger().info(f"Angle recorded: {self.angle}")
 
         js = JointState()
         js.header.stamp = self.get_clock().now().to_msg()
         js.name = [self.joint_name]
-        js.position = [float(self.distance)]
+        # 피드백 position에도 각도를 넣어 발행 (로봇 팔과 일관성 유지)
+        js.position = [float(self.angle)]
         self.pub_js.publish(js)
         self.rx_count += 1
 
-    # ----------------------------------------------------------------------
-    # Shutdown
-    # ----------------------------------------------------------------------
     def destroy_node(self):
+        """노드 종료 시 안전하게 하드웨어를 정리하고 상태를 표시"""
+        self.get_logger().info("Shutting down... Disabling motor and setting light to GREEN.")
         self.running = False
 
         try:
             if hasattr(self, 'serial') and self.serial.is_open:
+                # 1. 모터 비활성화 명령 (DISABLE = 10)
+                # 종료 후에도 모터가 뜨거워지거나 손상되는 것을 방지합니다.
+                disable_pkt = bytearray([SendFlag.DISABLE])
+                disable_pkt.extend(struct.pack('<f', 0.0))
+                disable_pkt.extend(b'\r\n')
+                self.serial.write(bytes(disable_pkt))
+                
+                # 2. 종료 라이트 명령 (GREEN = 2)
+                # 작업이 성공적으로 종료되었음을 알리는 신호입니다.
+                light_pkt = bytearray([SendFlag.LIGHT_CTRL])
+                light_pkt.extend(struct.pack('<f', float(Color.GREEN)))
+                light_pkt.extend(b'\r\n')
+                self.serial.write(bytes(light_pkt))
+                
+                # 3. 버퍼 비우기 및 대기
+                # 명령이 실제로 날아갈 시간을 벌어줍니다.
+                self.serial.flush()
+                time.sleep(0.1) 
+                
                 self.serial.close()
-        except Exception:
-            pass
+                self.get_logger().info("Successfully cleaned up hardware states.")
+        except Exception as e:
+            self.get_logger().error(f"Error during shutdown process: {e}")
 
         super().destroy_node()
 
