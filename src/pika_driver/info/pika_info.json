@@ -11,7 +11,7 @@
         "realsense_serial": "315122270900",
         "fisheye_device": "/dev/pika_sense_right_video",
         "motor_port": "/dev/pika_sense_right_serial",
-        "tracker_serial": "LHR-FBF3A347"
+        "tracker_serial": "LHR-CEC85DAC"
     },
     "gripper_left":{
         "namespace": "pika_left_gripper",
